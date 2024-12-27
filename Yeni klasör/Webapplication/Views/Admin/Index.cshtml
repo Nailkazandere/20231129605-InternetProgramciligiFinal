@@ -1,0 +1,60 @@
+﻿@{
+    ViewData["Title"] = "Admin Dashboard";
+    Layout = "~/Views/Shared/_adminLayout.cshtml";
+}
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-primary shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                                Toplam Sistem Depolama Alanı</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">
+                                <span id="systemStorage">@ViewBag.TotalStorage</span> GB
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-database fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Diğer widget'lar -->
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/lib/microsoft/signalr/dist/browser/signalr.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.1/signalr.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            var connection = new signalR.HubConnectionBuilder()
+                .withUrl("/fileHub")
+                .withAutomaticReconnect()
+                .build();
+
+            connection.on("ReceiveSystemStorageUpdate", function(totalSize) {
+                var gbSize = (totalSize / 1024).toFixed(2);
+                $("#systemStorage").text(gbSize);
+            });
+
+            connection.start()
+                .then(function() {
+                    console.log("SignalR Connected!");
+                    // Başlangıçta mevcut depolama bilgisini al
+                    $.get('@Url.Action("GetSystemStorageInfo", "Admin")', function(response) {
+                        var gbSize = (response.totalStorage / 1024).toFixed(2);
+                        $("#systemStorage").text(gbSize);
+                    });
+                })
+                .catch(function(err) {
+                    console.error(err.toString());
+                });
+        });
+    </script>
+}
+

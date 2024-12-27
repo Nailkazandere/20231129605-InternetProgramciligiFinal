@@ -1,0 +1,279 @@
+﻿@model List<Category>
+
+<div class="container mt-4">
+    <!-- Depolama Durumu Widget'ı -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-info text-white">
+                    <i class="fas fa-hdd me-2"></i>Depolama Alanınız 
+                </div>
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-3">
+                            <h4 class="mb-0" id="userStorage">@ViewBag.UserStorage GB</h4>
+                            <small class="text-muted">Kullanılan Alan</small>
+                        </div>
+                        <div class="col-md-9">
+                            <div class="progress" style="height: 25px;">
+                                <div id="storageProgress" 
+                                     class="progress-bar bg-info" 
+                                     role="progressbar" 
+                                     style="width: 0%">
+                                    <span id="storagePercentage">0%</span>
+                                </div>
+                            </div>
+                            <small class="text-muted">Toplam <span id="storageLimit">@ViewBag.StorageLimit</span> GB alanınız bulunmaktadır</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mevcut dosya yükleme ve listeleme bölümü -->
+    <div class="row">
+        <!-- Dosya Yükleme Formu -->
+        <div class="col-md-4">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <i class="fas fa-upload me-2"></i>Dosya Yükle
+                </div>
+                <div class="card-body">
+                    <form id="uploadForm" enctype="multipart/form-data">
+                        <div class="form-group">
+                            <label><i class="fas fa-folder me-2"></i>Kategori</label>
+                            <select class="form-select" name="categoryId" required>
+                                <option value="">Kategori Seçin</option>
+                                @foreach (var category in Model)
+                                {
+                                    <option value="@category.Id">@category.Name</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="form-group mt-3">
+                            <label><i class="fas fa-file me-2"></i>Dosya Seç</label>
+                            <input type="file" class="form-control" name="file" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100 mt-3">
+                            <i class="fas fa-cloud-upload-alt me-2"></i>Yükle
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dosya Listesi Kısmı -->
+        <div class="col-md-8">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                    <div>
+                        <i class="fas fa-folder-open me-2"></i>Dosyalarım
+                    </div>
+                    <div class="d-flex gap-2">
+                        <select id="categoryFilter" class="form-select form-select-sm" style="width: 200px;">
+                            <option value="">Tüm Kategoriler</option>
+                            @foreach (var category in Model)
+                            {
+                                <option value="@category.Id">@category.Name</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="noFiles" class="text-center p-5 d-none">
+                        <i class="fas fa-folder-open fa-3x text-muted"></i>
+                        <p class="mt-3 text-muted">Henüz dosya yüklenmedi</p>
+                    </div>
+                    <div id="filesList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/lib/microsoft/signalr/dist/browser/signalr.js"></script>
+    <script>
+        $(document).ready(function () {
+            // SignalR bağlantısını başlat
+            var connection = new signalR.HubConnectionBuilder()
+                .withUrl("/fileHub")
+                .withAutomaticReconnect()
+                .build();
+
+            function updateStorageInfo(currentStorage, storageLimit) {
+                var gbUsed = (currentStorage / 1024).toFixed(2);
+                var gbLimit = (storageLimit / 1024).toFixed(2);
+                var percentage = Math.min((currentStorage / storageLimit) * 100, 100).toFixed(1);
+
+                $("#userStorage").text(gbUsed + ' GB');
+                $("#storageLimit").text(gbLimit);
+                $("#storageProgress")
+                    .css("width", percentage + "%")
+                    .attr("aria-valuenow", percentage);
+                $("#storagePercentage").text(percentage + "%");
+
+                // Renk değişimi
+                if (percentage > 90) {
+                    $("#storageProgress").removeClass("bg-info bg-warning").addClass("bg-danger");
+                } else if (percentage > 70) {
+                    $("#storageProgress").removeClass("bg-info bg-danger").addClass("bg-warning");
+                } else {
+                    $("#storageProgress").removeClass("bg-warning bg-danger").addClass("bg-info");
+                }
+            }
+
+            // SignalR event handlers
+            connection.on("ReceiveUserStorageUpdate", function(currentStorage) {
+                $.get('@Url.Action("GetUserStorageInfo", "Home")', function(response) {
+                    updateStorageInfo(currentStorage, response.storageLimit);
+                });
+            });
+
+            connection.on("ReceiveStorageLimitUpdate", function(newLimit) {
+                $.get('@Url.Action("GetUserStorageInfo", "Home")', function(response) {
+                    updateStorageInfo(response.currentStorage, newLimit * 1024); // GB'ı MB'a çevir
+                });
+            });
+
+            // Bağlantıyı başlatma
+            connection.start()
+                .then(function() {
+                    console.log("SignalR Connected!");
+                    // Başlangıçta mevcut depolama bilgisini al
+                    $.get('@Url.Action("GetUserStorageInfo", "Home")', function(response) {
+                        updateStorageInfo(response.currentStorage, response.storageLimit);
+                    });
+                })
+                .catch(function(err) {
+                    console.error(err.toString());
+                });
+
+            // Dosya yükleme kontrolü
+            $("#uploadForm").on("submit", function(e) {
+                var fileInput = $("input[type='file']")[0];
+                if (fileInput.files.length > 0) {
+                    var fileSize = fileInput.files[0].size / (1024 * 1024); // MB cinsinden 
+                    
+                    $.get('@Url.Action("GetUserStorageInfo", "Home")', function(response) {
+                        var currentStorage = response.totalSize;
+                        if ((currentStorage + fileSize) > MAX_STORAGE) {
+                            e.preventDefault();
+                            toastr.error("Dosyayı yüklemek için yeterli alan yok!");
+                            return false;
+                        }
+                    });
+                }
+            });
+
+            loadFiles();
+
+            // Kategori filtreleme işlemi
+            $("#categoryFilter").on("change", function() {
+                loadFiles($(this).val());
+            });
+
+            $("#uploadForm").on("submit", function (e) {
+                e.preventDefault();
+                var formData = new FormData(this);
+
+                $.ajax({
+                    url: '@Url.Action("UploadFile", "Home")',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function (response) {
+                        if (response.success) {
+                            toastr.success(response.message);
+                            loadFiles();
+                            $("#uploadForm")[0].reset();
+                        } else {
+                            toastr.error(response.message);
+                        }
+                    },
+                    error: function () {
+                        toastr.error("Dosya yüklenirken bir hata oluştu!");
+                    }
+                });
+            });
+
+            function loadFiles(categoryId = null) {
+                var url = '@Url.Action("GetFiles", "Home")';
+                if (categoryId) {
+                    url += '?categoryId=' + categoryId;
+                }
+
+                $.get(url, function (response) {
+                    if (response.data && response.data.length > 0) {
+                        var html = '<div class="table-responsive"><table class="table table-hover">';
+                        html += `<thead class="table-light">
+                            <tr>
+                                <th><i class="fas fa-file me-2"></i>Dosya Adı</th>
+                                <th><i class="fas fa-weight me-2"></i>Boyut</th>
+                                <th><i class="fas fa-folder me-2"></i>Kategori</th>
+                                <th><i class="fas fa-calendar me-2"></i>Yüklenme Tarihi</th>
+                                <th><i class="fas fa-cogs me-2"></i>İşlemler</th>
+                            </tr></thead><tbody>`;
+                        
+                        response.data.forEach(function (file) {
+                            html += `<tr>
+                                <td>
+                                    <a href="${file.filePath}" target="_blank" class="text-decoration-none">
+                                        <i class="fas fa-file me-2"></i>${file.fileName}
+                                    </a>
+                                </td>
+                                <td>${file.fileSize.toFixed(2)} MB</td>
+                                <td><span class="badge bg-info">${file.category.name}</span></td>
+                                <td>${new Date(file.uploadedAt).toLocaleString()}</td>
+                                <td>
+                                    <div class="btn-group btn-group-sm">
+                                        <a href="${file.filePath}" class="btn btn-outline-primary" download 
+                                           title="İndir">
+                                            <i class="fas fa-download"></i>
+                                        </a>
+                                        <button class="btn btn-outline-danger" 
+                                                onclick="deleteFile(${file.id})"
+                                                title="Sil">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>`;
+                        });
+                        
+                        html += '</tbody></table></div>';
+                        $("#filesList").html(html);
+                        $("#noFiles").addClass("d-none");
+                    } else {
+                        $("#filesList").html('');
+                        $("#noFiles").removeClass("d-none");
+                    }
+                });
+            }
+
+            // Dosya silme kısmı
+            window.deleteFile = function(fileId) {
+                if (confirm('Dosyayı silmek istediğinizden emin misiniz?')) {
+                    $.ajax({
+                        url: '@Url.Action("DeleteFile", "Home")',
+                        type: 'POST',
+                        data: { id: fileId },
+                        success: function(response) {
+                            if (response.success) {
+                                toastr.success(response.message);
+                                loadFiles($("#categoryFilter").val()); // Dosya listesini yenileme
+                            } else {
+                                toastr.error(response.message);
+                            }
+                        },
+                        error: function() {
+                            toastr.error("Dosya silinirken bir hata oluştu");
+                        }
+                    });
+                }
+            }
+        });
+    </script>
+}
